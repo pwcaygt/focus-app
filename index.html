@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="zh-TW" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="專注">
+<title>專注</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#eef1f0;--card:#fbfcfb;--text:#33383a;--text2:#7b8688;--text3:#565f61;--sep:#d8dedd;
+  --accent:#56707E;--nav-bg:rgba(251,252,251,0.88);--input-bg:#e6ebe9;
+  --shadow:0 2px 12px rgba(0,0,0,0.05);--danger:#a35c5c;
+}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);font-size:16px}
+body{display:flex;flex-direction:column;overflow:hidden}
+#app{flex:1;overflow:hidden;display:flex;flex-direction:column;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+.page{display:none;flex:1;overflow-y:auto;overflow-x:hidden;padding:0 0 96px;-webkit-overflow-scrolling:touch}
+.page.active{display:block}
+#bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--nav-bg);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid var(--sep);display:flex;z-index:100;padding-bottom:env(safe-area-inset-bottom)}
+.nav-btn{flex:1;display:flex;align-items:center;justify-content:center;padding:14px 0;border:none;background:none;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer}
+.nav-btn.active{color:var(--accent)}
+.page-header{padding:12px 16px 8px;padding-top:calc(env(safe-area-inset-top) + 12px)}
+.page-title{font-size:26px;font-weight:700}
+.card{background:var(--card);border-radius:12px;padding:16px;margin:8px 16px;box-shadow:var(--shadow)}
+.card-title{font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.btn{display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;padding:10px 16px}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-secondary{background:var(--input-bg);color:var(--text)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-block{display:flex;width:100%}
+.btn:disabled{opacity:.4;cursor:default}
+.row{display:flex;align-items:center;gap:10px}
+.color-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.empty-state{text-align:center;color:var(--text2);font-size:13px;padding:24px 16px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);display:none;align-items:flex-end;justify-content:center;z-index:200}
+.modal-overlay.active{display:flex}
+.modal-sheet{background:var(--card);border-radius:16px 16px 0 0;padding:16px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto}
+.modal-title{font-size:17px;font-weight:700;margin-bottom:12px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--text2);margin-bottom:4px}
+.field input,.field select{width:100%;padding:10px;border:1px solid var(--sep);border-radius:8px;background:var(--input-bg);color:var(--text);font-size:15px}
+.field select{appearance:none;-webkit-appearance:none;-moz-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%237b8688' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='5 8 10 13 15 8'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:14px;padding-right:36px;cursor:pointer}
+.modal-actions{display:flex;gap:8px;margin-top:16px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="page active" id="page-schedule"><div class="page-header"><div class="page-title">本週課表</div></div></div>
+  <div class="page" id="page-execute"><div class="page-header"><div class="page-title">執行</div></div></div>
+  <div class="page" id="page-stats"><div class="page-header"><div class="page-title">統計</div></div></div>
+  <div class="page" id="page-categories"><div class="page-header"><div class="page-title">項目管理</div></div></div>
+  <div class="page" id="page-template"></div>
+</div>
+<div id="bottom-nav">
+  <button class="nav-btn active" data-page="schedule">本週課表</button>
+  <button class="nav-btn" data-page="execute">執行</button>
+  <button class="nav-btn" data-page="stats">統計</button>
+  <button class="nav-btn" data-page="categories">項目管理</button>
+</div>
+<div class="modal-overlay" id="modal-overlay"><div class="modal-sheet" id="modal-sheet"></div></div>
+<script id="attention-logic">
+const AttentionLogic = {
+  timeToMinutes(t) {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  },
+  getMonday(date) {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const day = d.getDay();
+    const diff = (day === 0 ? -6 : 1 - day);
+    d.setDate(d.getDate() + diff);
+    return d;
+  },
+  formatDateKey(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  },
+  getWeekKey(date) {
+    return this.formatDateKey(this.getMonday(date));
+  },
+  shiftWeekKey(weekKey, deltaWeeks) {
+    const [y, m, d] = weekKey.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    date.setDate(date.getDate() + deltaWeeks * 7);
+    return this.formatDateKey(date);
+  },
+  formatWeekRange(weekKey) {
+    const [y, m, d] = weekKey.split('-').map(Number);
+    const start = new Date(y, m - 1, d);
+    const end = new Date(y, m - 1, d + 6);
+    const fmt = (dt) => `${dt.getMonth() + 1}/${dt.getDate()}`;
+    return `${fmt(start)} - ${fmt(end)}`;
+  },
+  hasOverlap(candidate, existingBlocks) {
+    const cs = this.timeToMinutes(candidate.startTime);
+    const ce = this.timeToMinutes(candidate.endTime);
+    return existingBlocks.some(b => {
+      if (b.dayOfWeek !== candidate.dayOfWeek) return false;
+      if (candidate.id && b.id === candidate.id) return false;
+      const bs = this.timeToMinutes(b.startTime);
+      const be = this.timeToMinutes(b.endTime);
+      return cs < be && bs < ce;
+    });
+  },
+  formatHours(seconds) {
+    const hours = seconds / 3600;
+    return `${Math.round(hours * 10) / 10}h`;
+  },
+  calcScheduledSeconds(blocks, categoryId) {
+    return blocks
+      .filter(b => b.categoryId === categoryId)
+      .reduce((sum, b) => sum + (this.timeToMinutes(b.endTime) - this.timeToMinutes(b.startTime)) * 60, 0);
+  },
+  calcAchievedSeconds(logs, categoryId) {
+    return logs
+      .filter(l => l.categoryId === categoryId)
+      .reduce((sum, l) => sum + l.durationSec, 0);
+  },
+  calcAchievementRate(scheduledSeconds, achievedSeconds) {
+    if (scheduledSeconds === 0) return null;
+    return achievedSeconds / scheduledSeconds;
+  }
+};
+if (typeof module !== 'undefined') module.exports = AttentionLogic;
+</script>
+<script id="attention-store">
+const AttentionStore = {
+  createDefaultCategories() {
+    return [
+      { id: 'cat-english', name: '英文', color: '#6E8CAE', order: 0 },
+      { id: 'cat-invest', name: '投資', color: '#BFA05C', order: 1 },
+      { id: 'cat-project', name: '專案', color: '#56707E', order: 2 },
+      { id: 'cat-reading', name: '閱讀', color: '#7FA88C', order: 3 },
+      { id: 'cat-cert', name: '證照', color: '#9B8AA6', order: 4 },
+      { id: 'cat-class', name: '上課', color: '#BC8574', order: 5 },
+      { id: 'cat-fitness', name: '健身', color: '#C97B6E', order: 6 },
+      { id: 'cat-relationship', name: '關係', color: '#C3919A', order: 7 },
+      { id: 'cat-hobby', name: '興趣', color: '#5E9AA0', order: 8 },
+      { id: 'cat-memo', name: '備忘錄', color: '#A8A29A', order: 9 }
+    ];
+  },
+  createDefaultState() {
+    return {
+      categories: this.createDefaultCategories(),
+      subItems: [],
+      scheduleTemplate: [],
+      weekSchedules: {},
+      timeLogs: [],
+      activeTimer: null
+    };
+  },
+  genId(prefix) {
+    return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  },
+  createStore(storage, logic, idGen) {
+    const STORAGE_KEY = 'attentionAppState';
+    const genId = idGen || ((prefix) => this.genId(prefix));
+    let state = load();
+
+    function load() {
+      const raw = storage.getItem(STORAGE_KEY);
+      if (!raw) return AttentionStore.createDefaultState();
+      return JSON.parse(raw);
+    }
+    function persist() {
+      storage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    return {
+      getState() { return state; },
+
+      getCategories() { return state.categories.slice().sort((a, b) => a.order - b.order); },
+      addCategory(name, color) {
+        const cat = { id: genId('cat'), name, color, order: state.categories.length };
+        state.categories.push(cat);
+        persist();
+        return cat;
+      },
+      updateCategory(id, fields) {
+        const cat = state.categories.find(c => c.id === id);
+        if (!cat) throw new Error('category not found');
+        Object.assign(cat, fields);
+        persist();
+        return cat;
+      },
+      deleteCategory(id) {
+        state.categories = state.categories.filter(c => c.id !== id);
+        state.subItems = state.subItems.filter(s => s.categoryId !== id);
+        state.scheduleTemplate = state.scheduleTemplate.filter(b => b.categoryId !== id);
+        Object.keys(state.weekSchedules).forEach(wk => {
+          state.weekSchedules[wk] = state.weekSchedules[wk].filter(b => b.categoryId !== id);
+        });
+        persist();
+      },
+
+      getSubItems(categoryId) { return state.subItems.filter(s => s.categoryId === categoryId); },
+      addSubItem(categoryId, name) {
+        const item = { id: genId('sub'), categoryId, name };
+        state.subItems.push(item);
+        persist();
+        return item;
+      },
+      updateSubItem(id, fields) {
+        const item = state.subItems.find(s => s.id === id);
+        if (!item) throw new Error('subItem not found');
+        Object.assign(item, fields);
+        persist();
+        return item;
+      },
+      deleteSubItem(id) {
+        state.subItems = state.subItems.filter(s => s.id !== id);
+        persist();
+      },
+
+      getTemplateBlocks() { return state.scheduleTemplate.slice(); },
+      addTemplateBlock(block) {
+        if (logic.hasOverlap(block, state.scheduleTemplate)) throw new Error('overlap');
+        const b = Object.assign({ id: genId('blk') }, block);
+        state.scheduleTemplate.push(b);
+        persist();
+        return b;
+      },
+      updateTemplateBlock(id, fields) {
+        const b = state.scheduleTemplate.find(x => x.id === id);
+        if (!b) throw new Error('block not found');
+        const candidate = Object.assign({}, b, fields, { id });
+        if (logic.hasOverlap(candidate, state.scheduleTemplate)) throw new Error('overlap');
+        Object.assign(b, fields);
+        persist();
+        return b;
+      },
+      deleteTemplateBlock(id) {
+        state.scheduleTemplate = state.scheduleTemplate.filter(b => b.id !== id);
+        persist();
+      },
+
+      getEffectiveWeekBlocks(weekKey) {
+        return state.weekSchedules[weekKey] || state.scheduleTemplate;
+      },
+      isWeekMaterialized(weekKey) {
+        return Object.prototype.hasOwnProperty.call(state.weekSchedules, weekKey);
+      },
+      materializeWeek(weekKey) {
+        if (!this.isWeekMaterialized(weekKey)) {
+          state.weekSchedules[weekKey] = state.scheduleTemplate.map(b => Object.assign({}, b));
+          persist();
+        }
+        return state.weekSchedules[weekKey];
+      },
+      addWeekBlock(weekKey, block) {
+        this.materializeWeek(weekKey);
+        const blocks = state.weekSchedules[weekKey];
+        if (logic.hasOverlap(block, blocks)) throw new Error('overlap');
+        const b = Object.assign({ id: genId('blk') }, block);
+        blocks.push(b);
+        persist();
+        return b;
+      },
+      updateWeekBlock(weekKey, id, fields) {
+        this.materializeWeek(weekKey);
+        const blocks = state.weekSchedules[weekKey];
+        const b = blocks.find(x => x.id === id);
+        if (!b) throw new Error('block not found');
+        const candidate = Object.assign({}, b, fields, { id });
+        if (logic.hasOverlap(candidate, blocks)) throw new Error('overlap');
+        Object.assign(b, fields);
+        persist();
+        return b;
+      },
+      deleteWeekBlock(weekKey, id) {
+        this.materializeWeek(weekKey);
+        state.weekSchedules[weekKey] = state.weekSchedules[weekKey].filter(b => b.id !== id);
+        persist();
+      },
+
+      getActiveTimer() { return state.activeTimer; },
+      startTimer(categoryId, subItemId, nowFn) {
+        const now = (nowFn || Date.now)();
+        if (state.activeTimer) throw new Error('timer already running');
+        state.activeTimer = { categoryId, subItemId: subItemId || null, startTs: now };
+        persist();
+        return state.activeTimer;
+      },
+      getElapsedSeconds(nowFn) {
+        if (!state.activeTimer) return 0;
+        const now = (nowFn || Date.now)();
+        return Math.floor((now - state.activeTimer.startTs) / 1000);
+      },
+      stopTimer(nowFn) {
+        if (!state.activeTimer) throw new Error('no active timer');
+        const now = (nowFn || Date.now)();
+        const timer = state.activeTimer;
+        const category = state.categories.find(c => c.id === timer.categoryId);
+        const durationSec = Math.floor((now - timer.startTs) / 1000);
+        const log = {
+          id: genId('log'),
+          categoryId: timer.categoryId,
+          subItemId: timer.subItemId,
+          categoryName: category ? category.name : '',
+          categoryColor: category ? category.color : '',
+          startTs: timer.startTs,
+          endTs: now,
+          durationSec,
+          weekKey: logic.getWeekKey(new Date(timer.startTs))
+        };
+        state.timeLogs.push(log);
+        state.activeTimer = null;
+        persist();
+        return log;
+      },
+
+      getWeekStats(weekKey) {
+        const blocks = this.getEffectiveWeekBlocks(weekKey);
+        const logs = state.timeLogs.filter(l => l.weekKey === weekKey);
+        return this.getCategories().map(cat => {
+          const scheduledSeconds = logic.calcScheduledSeconds(blocks, cat.id);
+          const achievedSeconds = logic.calcAchievedSeconds(logs, cat.id);
+          return {
+            categoryId: cat.id,
+            name: cat.name,
+            color: cat.color,
+            scheduledSeconds,
+            achievedSeconds,
+            rate: logic.calcAchievementRate(scheduledSeconds, achievedSeconds)
+          };
+        });
+      }
+    };
+  }
+};
+if (typeof module !== 'undefined') module.exports = AttentionStore;
+</script>
+<script>
+const store = AttentionStore.createStore(window.localStorage, AttentionLogic, null);
+const DAY_NAMES = ['一', '二', '三', '四', '五', '六', '日'];
+const PALETTE = ['#6E8CAE', '#BFA05C', '#56707E', '#7FA88C', '#9B8AA6', '#BC8574', '#C97B6E', '#C3919A', '#5E9AA0', '#A8A29A'];
+
+let currentWeekKey = AttentionLogic.getWeekKey(new Date());
+let statsWeekKey = currentWeekKey;
+let selectedExecCategoryId = null;
+let timerInterval = null;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function openModal(html) {
+  document.getElementById('modal-sheet').innerHTML = html;
+  document.getElementById('modal-overlay').classList.add('active');
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
+  document.getElementById('modal-sheet').innerHTML = '';
+}
+document.getElementById('modal-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'modal-overlay') closeModal();
+});
+
+function switchPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelector(`.nav-btn[data-page="${name}"]`).classList.add('active');
+  render();
+}
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchPage(btn.dataset.page));
+});
+
+function render() {
+  renderSchedulePage();
+  renderExecutePage();
+  renderStatsPage();
+  renderCategoriesPage();
+}
+
+function renderSchedulePage() {
+  const el = document.getElementById('page-schedule');
+  const blocks = store.getEffectiveWeekBlocks(currentWeekKey);
+  const cats = store.getCategories();
+  const catById = Object.fromEntries(cats.map(c => [c.id, c]));
+  el.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">本週課表</div>
+      <div class="row" style="margin-top:8px;justify-content:space-between">
+        <button class="btn btn-secondary" id="week-prev">‹ 上一週</button>
+        <div style="font-size:13px;color:var(--text2)">${AttentionLogic.formatWeekRange(currentWeekKey)}</div>
+        <button class="btn btn-secondary" id="week-next">下一週 ›</button>
+      </div>
+      <button class="btn btn-secondary btn-block" id="btn-edit-template" style="margin-top:8px">編輯固定課表</button>
+    </div>
+    ${DAY_NAMES.map((dn, idx) => {
+      const dayBlocks = blocks.filter(b => b.dayOfWeek === idx).sort((a, b) => a.startTime.localeCompare(b.startTime));
+      return `
+      <div class="card">
+        <div class="card-title">週${dn}</div>
+        ${dayBlocks.map(b => `
+          <div class="row" style="padding:8px 0;border-bottom:1px solid var(--sep)">
+            <div class="color-dot" style="background:${catById[b.categoryId] ? catById[b.categoryId].color : '#ccc'}"></div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600">${catById[b.categoryId] ? escapeHtml(catById[b.categoryId].name) : '（已刪除）'}${b.subItemId ? ' · ' + escapeHtml((store.getSubItems(b.categoryId).find(s => s.id === b.subItemId) || { name: '' }).name) : ''}</div>
+              <div style="font-size:12px;color:var(--text2)">${b.startTime}–${b.endTime}</div>
+            </div>
+            <button class="btn btn-secondary" data-action="edit-block" data-id="${b.id}" data-day="${idx}" style="font-size:12px;padding:4px 10px">編輯</button>
+            <button class="btn btn-danger" data-action="del-block" data-id="${b.id}" style="font-size:12px;padding:4px 10px">刪除</button>
+          </div>
+        `).join('') || '<div class="empty-state">尚無安排</div>'}
+        <button class="btn btn-secondary" data-action="add-block" data-day="${idx}" style="margin-top:8px;font-size:12px;padding:6px 10px">+ 新增時段</button>
+      </div>
+    `;
+    }).join('')}
+  `;
+  document.getElementById('week-prev').addEventListener('click', () => { currentWeekKey = AttentionLogic.shiftWeekKey(currentWeekKey, -1); renderSchedulePage(); });
+  document.getElementById('week-next').addEventListener('click', () => { currentWeekKey = AttentionLogic.shiftWeekKey(currentWeekKey, 1); renderSchedulePage(); });
+  document.getElementById('btn-edit-template').addEventListener('click', openTemplatePage);
+  el.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => handleScheduleAction(btn.dataset));
+  });
+}
+
+function handleScheduleAction(ds) {
+  if (ds.action === 'add-block') return openBlockModal(Number(ds.day));
+  if (ds.action === 'edit-block') {
+    const block = store.getEffectiveWeekBlocks(currentWeekKey).find(b => b.id === ds.id);
+    return openBlockModal(Number(ds.day), block);
+  }
+  if (ds.action === 'del-block') {
+    store.deleteWeekBlock(currentWeekKey, ds.id);
+    renderSchedulePage();
+  }
+}
+
+function openBlockModal(dayOfWeek, block) {
+  const cats = store.getCategories();
+  openModal(`
+    <div class="modal-title">${block ? '編輯時段' : '新增時段'} · 週${DAY_NAMES[dayOfWeek]}</div>
+    <div class="field"><label>開始時間</label><input type="time" id="f-start" value="${block ? block.startTime : '19:00'}"></div>
+    <div class="field"><label>結束時間</label><input type="time" id="f-end" value="${block ? block.endTime : '20:00'}"></div>
+    <div class="field"><label>大項目</label>
+      <select id="f-cat">${cats.map(c => `<option value="${c.id}" ${block && block.categoryId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>子項目（可選）</label><select id="f-sub"></select></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="btn-cancel">取消</button>
+      <button class="btn btn-primary btn-block" id="btn-save">儲存</button>
+    </div>
+  `);
+  function refreshSubOptions() {
+    const catId = document.getElementById('f-cat').value;
+    const subs = store.getSubItems(catId);
+    document.getElementById('f-sub').innerHTML = '<option value="">（不指定）</option>' +
+      subs.map(s => `<option value="${s.id}" ${block && block.subItemId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+  }
+  refreshSubOptions();
+  document.getElementById('f-cat').addEventListener('change', refreshSubOptions);
+  document.getElementById('btn-cancel').addEventListener('click', closeModal);
+  document.getElementById('btn-save').addEventListener('click', () => {
+    const startTime = document.getElementById('f-start').value;
+    const endTime = document.getElementById('f-end').value;
+    const categoryId = document.getElementById('f-cat').value;
+    const subItemId = document.getElementById('f-sub').value || null;
+    if (!startTime || !endTime || startTime >= endTime) { alert('時間區間不正確'); return; }
+    try {
+      if (block) store.updateWeekBlock(currentWeekKey, block.id, { dayOfWeek, startTime, endTime, categoryId, subItemId });
+      else store.addWeekBlock(currentWeekKey, { dayOfWeek, startTime, endTime, categoryId, subItemId });
+    } catch (e) {
+      alert('這個時段跟當天其他安排重疊了');
+      return;
+    }
+    closeModal();
+    renderSchedulePage();
+  });
+}
+
+function openTemplatePage() {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-template').classList.add('active');
+  renderTemplatePage();
+}
+
+function closeTemplatePage() {
+  switchPage('schedule');
+}
+
+function renderTemplatePage() {
+  const el = document.getElementById('page-template');
+  const blocks = store.getTemplateBlocks();
+  const cats = store.getCategories();
+  const catById = Object.fromEntries(cats.map(c => [c.id, c]));
+  el.innerHTML = `
+    <div class="page-header">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <button class="btn btn-secondary" id="btn-back-template">‹ 返回本週課表</button>
+        <div class="page-title" style="font-size:20px">固定課表</div>
+        <div style="width:1px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-top:6px">在這裡設定的時段會套用到所有尚未個別調整過的週次</div>
+    </div>
+    ${DAY_NAMES.map((dn, idx) => {
+      const dayBlocks = blocks.filter(b => b.dayOfWeek === idx).sort((a, b) => a.startTime.localeCompare(b.startTime));
+      return `
+      <div class="card">
+        <div class="card-title">週${dn}</div>
+        ${dayBlocks.map(b => `
+          <div class="row" style="padding:8px 0;border-bottom:1px solid var(--sep)">
+            <div class="color-dot" style="background:${catById[b.categoryId] ? catById[b.categoryId].color : '#ccc'}"></div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600">${catById[b.categoryId] ? escapeHtml(catById[b.categoryId].name) : '（已刪除）'}${b.subItemId ? ' · ' + escapeHtml((store.getSubItems(b.categoryId).find(s => s.id === b.subItemId) || { name: '' }).name) : ''}</div>
+              <div style="font-size:12px;color:var(--text2)">${b.startTime}–${b.endTime}</div>
+            </div>
+            <button class="btn btn-secondary" data-action="edit-tblock" data-id="${b.id}" data-day="${idx}" style="font-size:12px;padding:4px 10px">編輯</button>
+            <button class="btn btn-danger" data-action="del-tblock" data-id="${b.id}" style="font-size:12px;padding:4px 10px">刪除</button>
+          </div>
+        `).join('') || '<div class="empty-state">尚無安排</div>'}
+        <button class="btn btn-secondary" data-action="add-tblock" data-day="${idx}" style="margin-top:8px;font-size:12px;padding:6px 10px">+ 新增時段</button>
+      </div>
+    `;
+    }).join('')}
+  `;
+  document.getElementById('btn-back-template').addEventListener('click', closeTemplatePage);
+  el.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => handleTemplateAction(btn.dataset));
+  });
+}
+
+function handleTemplateAction(ds) {
+  if (ds.action === 'add-tblock') return openTemplateBlockModal(Number(ds.day));
+  if (ds.action === 'edit-tblock') {
+    const block = store.getTemplateBlocks().find(b => b.id === ds.id);
+    return openTemplateBlockModal(Number(ds.day), block);
+  }
+  if (ds.action === 'del-tblock') {
+    store.deleteTemplateBlock(ds.id);
+    renderTemplatePage();
+  }
+}
+
+function openTemplateBlockModal(dayOfWeek, block) {
+  const cats = store.getCategories();
+  openModal(`
+    <div class="modal-title">${block ? '編輯固定時段' : '新增固定時段'} · 週${DAY_NAMES[dayOfWeek]}</div>
+    <div class="field"><label>開始時間</label><input type="time" id="f-start" value="${block ? block.startTime : '19:00'}"></div>
+    <div class="field"><label>結束時間</label><input type="time" id="f-end" value="${block ? block.endTime : '20:00'}"></div>
+    <div class="field"><label>大項目</label>
+      <select id="f-cat">${cats.map(c => `<option value="${c.id}" ${block && block.categoryId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>子項目（可選）</label><select id="f-sub"></select></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="btn-cancel">取消</button>
+      <button class="btn btn-primary btn-block" id="btn-save">儲存</button>
+    </div>
+  `);
+  function refreshSubOptions() {
+    const catId = document.getElementById('f-cat').value;
+    const subs = store.getSubItems(catId);
+    document.getElementById('f-sub').innerHTML = '<option value="">（不指定）</option>' +
+      subs.map(s => `<option value="${s.id}" ${block && block.subItemId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+  }
+  refreshSubOptions();
+  document.getElementById('f-cat').addEventListener('change', refreshSubOptions);
+  document.getElementById('btn-cancel').addEventListener('click', closeModal);
+  document.getElementById('btn-save').addEventListener('click', () => {
+    const startTime = document.getElementById('f-start').value;
+    const endTime = document.getElementById('f-end').value;
+    const categoryId = document.getElementById('f-cat').value;
+    const subItemId = document.getElementById('f-sub').value || null;
+    if (!startTime || !endTime || startTime >= endTime) { alert('時間區間不正確'); return; }
+    try {
+      if (block) store.updateTemplateBlock(block.id, { dayOfWeek, startTime, endTime, categoryId, subItemId });
+      else store.addTemplateBlock({ dayOfWeek, startTime, endTime, categoryId, subItemId });
+    } catch (e) {
+      alert('這個時段跟固定課表中其他安排重疊了');
+      return;
+    }
+    closeModal();
+    renderTemplatePage();
+  });
+}
+
+function renderExecutePage() {
+  const el = document.getElementById('page-execute');
+  const cats = store.getCategories();
+  const timer = store.getActiveTimer();
+
+  if (timer) {
+    const cat = cats.find(c => c.id === timer.categoryId);
+    const sub = store.getSubItems(timer.categoryId).find(s => s.id === timer.subItemId);
+    const elapsed = store.getElapsedSeconds();
+    const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+    const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    el.innerHTML = `
+      <div class="page-header"><div class="page-title">執行</div></div>
+      <div class="card" style="text-align:center">
+        <div class="color-dot" style="background:${cat ? cat.color : '#ccc'};width:14px;height:14px;margin:0 auto 8px"></div>
+        <div style="font-size:18px;font-weight:700">${cat ? escapeHtml(cat.name) : ''}${sub ? ' · ' + escapeHtml(sub.name) : ''}</div>
+        <div style="font-size:40px;font-weight:700;margin:16px 0;font-variant-numeric:tabular-nums">${h}:${m}:${s}</div>
+        <button class="btn btn-danger btn-block" id="btn-stop">停止</button>
+      </div>
+    `;
+    document.getElementById('btn-stop').addEventListener('click', () => {
+      store.stopTimer();
+      clearInterval(timerInterval);
+      timerInterval = null;
+      render();
+    });
+    if (!timerInterval) timerInterval = setInterval(renderExecutePage, 1000);
+    return;
+  }
+
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  if (!selectedExecCategoryId || !cats.find(c => c.id === selectedExecCategoryId)) {
+    selectedExecCategoryId = cats[0] ? cats[0].id : null;
+  }
+  const subs = selectedExecCategoryId ? store.getSubItems(selectedExecCategoryId) : [];
+  let selectedSubId = null;
+
+  el.innerHTML = `
+    <div class="page-header"><div class="page-title">執行</div></div>
+    <div class="card">
+      <div class="card-title">大項目</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${cats.map(c => `
+          <button class="btn ${c.id === selectedExecCategoryId ? 'btn-primary' : 'btn-secondary'}" data-action="select-cat" data-id="${c.id}" style="font-size:13px">${escapeHtml(c.name)}</button>
+        `).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">子項目（可選）</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${subs.map(s => `<button class="btn btn-secondary" data-action="select-sub" data-id="${s.id}" style="font-size:13px">${escapeHtml(s.name)}</button>`).join('') || '<div class="empty-state">此項目尚無子項目，可直接開始</div>'}
+      </div>
+    </div>
+    <div class="card">
+      <button class="btn btn-primary btn-block" id="btn-start" ${!selectedExecCategoryId ? 'disabled' : ''}>開始計時</button>
+    </div>
+  `;
+
+  el.querySelectorAll('[data-action="select-cat"]').forEach(btn => {
+    btn.addEventListener('click', () => { selectedExecCategoryId = btn.dataset.id; renderExecutePage(); });
+  });
+  el.querySelectorAll('[data-action="select-sub"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedSubId = btn.dataset.id;
+      el.querySelectorAll('[data-action="select-sub"]').forEach(b => { b.classList.remove('btn-primary'); b.classList.add('btn-secondary'); });
+      btn.classList.remove('btn-secondary');
+      btn.classList.add('btn-primary');
+    });
+  });
+  const startBtn = document.getElementById('btn-start');
+  if (startBtn) {
+    startBtn.addEventListener('click', () => {
+      store.startTimer(selectedExecCategoryId, selectedSubId);
+      render();
+    });
+  }
+}
+function renderStatsPage() {
+  const el = document.getElementById('page-stats');
+  const stats = store.getWeekStats(statsWeekKey);
+  const totalScheduled = stats.reduce((sum, s) => sum + s.scheduledSeconds, 0);
+  const totalAchieved = stats.reduce((sum, s) => sum + s.achievedSeconds, 0);
+  const totalRate = AttentionLogic.calcAchievementRate(totalScheduled, totalAchieved);
+  el.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">統計</div>
+      <div class="row" style="margin-top:8px;justify-content:space-between">
+        <button class="btn btn-secondary" id="stats-prev">‹ 上一週</button>
+        <div style="font-size:13px;color:var(--text2)">${AttentionLogic.formatWeekRange(statsWeekKey)}</div>
+        <button class="btn btn-secondary" id="stats-next">下一週 ›</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">整體達成率</div>
+      <div style="font-size:28px;font-weight:700;color:var(--accent)">${totalRate === null ? '無安排' : Math.round(totalRate * 100) + '%'}</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:4px">安排 ${AttentionLogic.formatHours(totalScheduled)} · 達成 ${AttentionLogic.formatHours(totalAchieved)}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">各大項目</div>
+      ${stats.map(s => `
+        <div class="row" style="padding:10px 0;border-bottom:1px solid var(--sep)">
+          <div class="color-dot" style="background:${s.color}"></div>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:600">${escapeHtml(s.name)}</div>
+            <div style="font-size:12px;color:var(--text2)">安排 ${AttentionLogic.formatHours(s.scheduledSeconds)} · 達成 ${AttentionLogic.formatHours(s.achievedSeconds)}</div>
+          </div>
+          <div style="font-size:18px;font-weight:700;color:var(--text3)">${s.rate === null ? '－' : Math.round(s.rate * 100) + '%'}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  document.getElementById('stats-prev').addEventListener('click', () => { statsWeekKey = AttentionLogic.shiftWeekKey(statsWeekKey, -1); renderStatsPage(); });
+  document.getElementById('stats-next').addEventListener('click', () => { statsWeekKey = AttentionLogic.shiftWeekKey(statsWeekKey, 1); renderStatsPage(); });
+}
+
+function renderCategoriesPage() {
+  const el = document.getElementById('page-categories');
+  const cats = store.getCategories();
+  el.innerHTML = `
+    <div class="page-header"><div class="page-title">項目管理</div></div>
+    <div class="card">
+      <div class="card-title">大項目</div>
+      ${cats.map(c => `
+        <div class="row" style="padding:10px 0;border-bottom:1px solid var(--sep)">
+          <div class="color-dot" style="background:${c.color}"></div>
+          <div style="flex:1;font-weight:600">${escapeHtml(c.name)}</div>
+          <button class="btn btn-secondary" data-action="edit-cat" data-id="${c.id}">編輯</button>
+          <button class="btn btn-danger" data-action="del-cat" data-id="${c.id}">刪除</button>
+        </div>
+        <div style="padding:6px 0 12px 20px">
+          ${store.getSubItems(c.id).map(s => `
+            <div class="row" style="padding:4px 0">
+              <div style="flex:1;font-size:13px;color:var(--text3)">${escapeHtml(s.name)}</div>
+              <button class="btn btn-secondary" data-action="edit-sub" data-id="${s.id}" data-cat="${c.id}" style="padding:4px 10px;font-size:12px">編輯</button>
+              <button class="btn btn-danger" data-action="del-sub" data-id="${s.id}" style="padding:4px 10px;font-size:12px">刪除</button>
+            </div>
+          `).join('') || '<div class="empty-state">尚無子項目</div>'}
+          <button class="btn btn-secondary" data-action="add-sub" data-cat="${c.id}" style="margin-top:6px;font-size:12px;padding:6px 10px">+ 新增子項目</button>
+        </div>
+      `).join('')}
+      <button class="btn btn-primary btn-block" data-action="add-cat" style="margin-top:8px">+ 新增大項目</button>
+    </div>
+  `;
+  el.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => handleCategoriesAction(btn.dataset));
+  });
+}
+
+function handleCategoriesAction(ds) {
+  if (ds.action === 'add-cat') return openCategoryModal();
+  if (ds.action === 'edit-cat') return openCategoryModal(store.getCategories().find(c => c.id === ds.id));
+  if (ds.action === 'del-cat') {
+    if (confirm('刪除這個大項目會一併刪除其子項目與課表時段，確定嗎？')) {
+      store.deleteCategory(ds.id);
+      render();
+    }
+    return;
+  }
+  if (ds.action === 'add-sub') return openSubItemModal(ds.cat);
+  if (ds.action === 'edit-sub') return openSubItemModal(ds.cat, store.getSubItems(ds.cat).find(s => s.id === ds.id));
+  if (ds.action === 'del-sub') {
+    store.deleteSubItem(ds.id);
+    render();
+  }
+}
+
+function openCategoryModal(cat) {
+  openModal(`
+    <div class="modal-title">${cat ? '編輯大項目' : '新增大項目'}</div>
+    <div class="field"><label>名稱</label><input id="f-name" value="${cat ? escapeHtml(cat.name) : ''}"></div>
+    <div class="field"><label>顏色</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${PALETTE.map(c => `<div class="color-dot" data-color="${c}" style="width:28px;height:28px;background:${c};cursor:pointer;border:2px solid ${cat && cat.color === c ? 'var(--text)' : 'transparent'}"></div>`).join('')}
+      </div>
+      <input type="hidden" id="f-color" value="${cat ? cat.color : PALETTE[0]}">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="btn-cancel">取消</button>
+      <button class="btn btn-primary btn-block" id="btn-save">儲存</button>
+    </div>
+  `);
+  document.querySelectorAll('#modal-sheet [data-color]').forEach(dot => {
+    dot.addEventListener('click', () => {
+      document.getElementById('f-color').value = dot.dataset.color;
+      document.querySelectorAll('#modal-sheet [data-color]').forEach(d => d.style.border = '2px solid transparent');
+      dot.style.border = '2px solid var(--text)';
+    });
+  });
+  document.getElementById('btn-cancel').addEventListener('click', closeModal);
+  document.getElementById('btn-save').addEventListener('click', () => {
+    const name = document.getElementById('f-name').value.trim();
+    const color = document.getElementById('f-color').value;
+    if (!name) return;
+    if (cat) store.updateCategory(cat.id, { name, color });
+    else store.addCategory(name, color);
+    closeModal();
+    render();
+  });
+}
+
+function openSubItemModal(categoryId, sub) {
+  openModal(`
+    <div class="modal-title">${sub ? '編輯子項目' : '新增子項目'}</div>
+    <div class="field"><label>名稱</label><input id="f-sub-name" value="${sub ? escapeHtml(sub.name) : ''}"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="btn-cancel">取消</button>
+      <button class="btn btn-primary btn-block" id="btn-save">儲存</button>
+    </div>
+  `);
+  document.getElementById('btn-cancel').addEventListener('click', closeModal);
+  document.getElementById('btn-save').addEventListener('click', () => {
+    const name = document.getElementById('f-sub-name').value.trim();
+    if (!name) return;
+    if (sub) store.updateSubItem(sub.id, { name });
+    else store.addSubItem(categoryId, name);
+    closeModal();
+    render();
+  });
+}
+
+switchPage('schedule');
+</script>
+</body>
+</html>
